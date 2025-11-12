@@ -16,7 +16,8 @@
       --pending: #e5e7eb;        /* gris claro para pendiente */
       --regular: #fde68a;        /* amarillo pastel */
       --approved: #86efac;       /* verde pastel */
-      --blocked: #e2e8f0;        /* bloqueado */
+      (--blocked: #e2e8f0;        /* bloqueado */
+      --available: #ABCFF1;      /* azul pastel (del color enviado) */
       --badge: #fbcfe8;          /* rosa muy suave */
       --shadow: 0 8px 20px rgba(2, 6, 23, 0.06);
       --radius: 16px;
@@ -85,6 +86,7 @@
     .card.regular{ background: var(--regular); }
     .card.approved{ background: var(--approved); }
     .card.blocked{ background: var(--blocked); filter: grayscale(.3) brightness(.98); cursor: not-allowed; }
+    .card.available{ outline: 2px dashed #88a9c9; background: var(--available); }
 
     /* Tooltip */
     .tooltip{ position: absolute; inset: auto auto 100% 0; transform: translateY(-8px); background: #0f172a; color: #fff; border-radius: 10px; padding: 10px 12px; box-shadow: var(--shadow); min-width: 220px; max-width: 320px; font-size: 12px; line-height: 1.25; display:none; }
@@ -117,6 +119,19 @@
 
   <main class="grid" id="grid"></main>
 
+  <!-- Diálogo para gestionar notas -->
+  <dialog id="dlgGrades">
+    <form method="dialog" id="gradesForm" style="min-width:320px; max-width:520px; border:1px solid #e5e7eb; border-radius:16px; padding:16px; background:white">
+      <h3 style="margin:0 0 10px 0; font-size:18px">Notas de <span id="dlgCourseTitle"></span></h3>
+      <div style="display:grid; gap:12px">
+        <label style="display:grid; gap:6px">
+          <span style="font-size:12px; color:#6b7280">Parciales (separados por coma)</span>
+          <input id="inpParciales" type="text" placeholder="ej: 7, 8, 9" style="padding:10px; border:1px solid #e5e7eb; border-radius:10px" />
+        </label>
+        <label style="display:grid; gap:6px">
+          <span style="font-size:12px; color:#6b7280">Finales (separados por coma)</span>
+          <input id="inpFinales" type="text" placeholder="ej: 6, 7" style="padding:10px; border:1px s
+
   <template id="tpl-col">
     <section class="col">
       <h2><span class="h-title"></span><span class="badge"></span></h2>
@@ -131,7 +146,9 @@
         <span class="code"></span>
         <span class="mod" title="Modalidad">A</span>
         <span class="state">Pendiente</span>
+        <button type="button" class="btn-grade" title="Cargar notas">📝</button>
       </div>
+      <div class="grades"></div>
       <div class="tooltip" role="tooltip"></div>
     </article>
   </template>
