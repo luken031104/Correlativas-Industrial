@@ -16,7 +16,7 @@
       --pending: #e5e7eb;        /* gris claro para pendiente */
       --regular: #fde68a;        /* amarillo pastel */
       --approved: #86efac;       /* verde pastel */
-      (--blocked: #e2e8f0;        /* bloqueado */
+      --blocked: #e2e8f0;        /* bloqueado */
       --available: #ABCFF1;      /* azul pastel (del color enviado) */
       --badge: #fbcfe8;          /* rosa muy suave */
       --shadow: 0 8px 20px rgba(2, 6, 23, 0.06);
@@ -130,7 +130,16 @@
         </label>
         <label style="display:grid; gap:6px">
           <span style="font-size:12px; color:#6b7280">Finales (separados por coma)</span>
-          <input id="inpFinales" type="text" placeholder="ej: 6, 7" style="padding:10px; border:1px s
+          <input id="inpFinales" type="text" placeholder="ej: 6, 7" style="padding:10px; border:1px solid #e5e7eb; border-radius:10px" />
+        </label>
+        <div id="avgFinal" style="font-size:14px; color:#334155; background:#f1f5f9; padding:8px 10px; border-radius:10px">Promedio de finales: –</div>
+        <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:6px">
+          <button value="cancel" class="btn" type="reset">Cancelar</button>
+          <button id="btnSaveGrades" value="default" class="btn secondary" type="submit">Guardar</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
 
   <template id="tpl-col">
     <section class="col">
@@ -242,12 +251,16 @@
 
   // ============ Utilidades de almacenamiento ============
   const LS_KEY = 'utn-frc-industrial-plan-2023';
+  const LS_GRADES = 'utn-frc-industrial-grades';
   let state = loadState(); // { [code]: 0|1|2 }
+  let grades = loadGrades(); // { [code]: { parciales:number[], finales:number[] } }
 
   function loadState(){
     try{ return JSON.parse(localStorage.getItem(LS_KEY)) || {}; }catch{ return {}; }
   }
   function saveState(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+  function loadGrades(){ try{ return JSON.parse(localStorage.getItem(LS_GRADES)) || {}; }catch{ return {}; } }
+  function saveGrades(){ localStorage.setItem(LS_GRADES, JSON.stringify(grades)); }
 
   // ============ Render del grid ============
   const grid = document.getElementById('grid');
@@ -287,22 +300,19 @@
 
     applyVisualState(el, getState(item.code));
     updateBlocked(el, item);
+    renderGradesOnCard(el, item.code);
 
     el.addEventListener('click', (ev)=>{
-      if(el.classList.contains('blocked')){
-        toggleTip(el, true);
-        return; // no permitir cambios si está bloqueada
-      }
+      if(ev.target && ev.target.classList.contains('btn-grade')) return; // el botón abre diálogo
+      if(el.classList.contains('blocked')){ toggleTip(el, true); return; }
       const current = getState(item.code);
       const next = (current + 1) % 3; // 0->1->2->0
 
       if(current === 0 && next === 1){
-        // quiere regularizar: chequear reg
         const missingReg = missingForRegular(item);
         if(missingReg.length){ return showBlocked(el, item, missingReg, []); }
       }
       if(current === 1 && next === 2){
-        // quiere aprobar: chequear apr
         const missingApr = missingForApproved(item);
         if(missingApr.length){ return showBlocked(el, item, [], missingApr); }
       }
@@ -310,9 +320,13 @@
       refreshAll();
     });
 
-    el.addEventListener('mouseenter', ()=>{
-      if(el.classList.contains('blocked')) toggleTip(el, true);
+    // botón de notas
+    el.querySelector('.btn-grade').addEventListener('click', (ev)=>{
+      ev.stopPropagation();
+      openGradesDialog(item.code, item.name);
     });
+
+    el.addEventListener('mouseenter', ()=>{ if(el.classList.contains('blocked')) toggleTip(el, true); });
     el.addEventListener('mouseleave', ()=>toggleTip(el,false));
     el.addEventListener('blur', ()=>toggleTip(el,false));
 
@@ -360,13 +374,18 @@
       tip = reasonText(item, miss, []);
     } else if(s===1){
       const miss = missingForApproved(item);
-      blocked = miss.length>0; // bloquear sólo el pase a aprobada (pero permitimos mantener regular)
+      blocked = miss.length>0;
       tip = reasonText(item, [], miss);
     }
     card.classList.toggle('blocked', blocked);
+    // Disponible para cursar: pendiente y sin requisitos faltantes
+    const available = !blocked && s===0;
+    card.classList.toggle('available', available);
+
     const tipEl = card.querySelector('.tooltip');
     tipEl.textContent = blocked ? tip : '';
-    card.title = blocked ? tip.replaceAll('\n',' \u2022 ') : '';
+    card.title = blocked ? tip.replaceAll('
+',' • ') : '';
   }
 
   function showBlocked(card, item, missReg, missApr){
@@ -378,17 +397,75 @@
   function toggleTip(card, show){ card.classList.toggle('show-tip', !!show); }
 
   function refreshAll(){
-    // Reaplica estado visual y bloqueo a todas las cartas
     document.querySelectorAll('.card').forEach(card=>{
       const code = +card.dataset.code;
       applyVisualState(card, getState(code));
       updateBlocked(card, courseByCode(code));
+      renderGradesOnCard(card, code);
     });
+  }
+
+  // ==== Gestión de notas ====
+  function getGrades(code){ return grades[code] || { parciales:[], finales:[] }; }
+  function setGrades(code, g){ grades[code] = g; saveGrades(); }
+  function parseNums(str){
+    if(!str) return [];
+    return str.split(',').map(s=>parseFloat(s.trim().replace(',', '.'))).filter(n=>!isNaN(n));
+  }
+  function avg(arr){ if(!arr.length) return null; const s = arr.reduce((a,b)=>a+b,0); return +(s/arr.length).toFixed(2); }
+
+  const dlg = document.getElementById('dlgGrades');
+  const form = document.getElementById('gradesForm');
+  const inpP = document.getElementById('inpParciales');
+  const inpF = document.getElementById('inpFinales');
+  const avgBox = document.getElementById('avgFinal');
+  const titleSpan = document.getElementById('dlgCourseTitle');
+  let currentCourseCode = null;
+
+  function openGradesDialog(code, name){
+    currentCourseCode = code;
+    titleSpan.textContent = `#${code} – ${name}`;
+    const g = getGrades(code);
+    inpP.value = g.parciales.join(', ');
+    inpF.value = g.finales.join(', ');
+    updateAvgPreview();
+    dlg.showModal();
+  }
+
+  function updateAvgPreview(){
+    const finals = parseNums(inpF.value);
+    const m = avg(finals);
+    avgBox.textContent = 'Promedio de finales: ' + (m==null? '–' : m);
+  }
+  inpF.addEventListener('input', updateAvgPreview);
+
+  form.addEventListener('submit', (ev)=>{
+    ev.preventDefault();
+    const g = {
+      parciales: parseNums(inpP.value),
+      finales: parseNums(inpF.value),
+    };
+    setGrades(currentCourseCode, g);
+    dlg.close();
+    refreshAll();
+  });
+
+  // Render de mini badges de notas
+  function renderGradesOnCard(card, code){
+    const g = getGrades(code);
+    const avgF = avg(g.finales);
+    const box = card.querySelector('.grades');
+    const pill = (label,val)=>`<span style="display:inline-block;background:#f1f5f9;color:#334155;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700">${label}: ${val}</span>`;
+    const pills = [];
+    if(g.parciales.length) pills.push(pill('Parciales', g.parciales.join('·')));
+    if(g.finales.length) pills.push(pill('Finales', g.finales.join('·')));
+    if(avgF!=null) pills.push(pill('Prom. Finales', avgF));
+    box.innerHTML = pills.join(' ');
   }
 
   // ============ Exportar / Importar / Reset ============
   document.getElementById('btnExport').addEventListener('click', ()=>{
-    const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
+    const blob = new Blob([JSON.stringify({state, grades}, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = 'malla-utn-frc-industrial-estado.json'; a.click();
@@ -401,7 +478,13 @@
     reader.onload = () => {
       try{
         const data = JSON.parse(String(reader.result));
-        if(typeof data === 'object' && data){ state = data; saveState(); refreshAll(); }
+        if(typeof data === 'object' && data){
+          if(data.state){ state = data.state; saveState(); }
+          if(data.grades){ grades = data.grades; saveGrades(); }
+          // Compatibilidad con exportaciones antiguas
+          if(!data.state && !data.grades){ state = data; saveState(); }
+          refreshAll();
+        }
       }catch(e){ alert('Archivo inválido. Debe ser JSON exportado desde esta malla.'); }
     };
     reader.readAsText(file);
@@ -409,7 +492,7 @@
 
   document.getElementById('btnReset').addEventListener('click', ()=>{
     if(confirm('¿Seguro que deseas borrar todo tu progreso?')){
-      state = {}; saveState(); refreshAll();
+      state = {}; grades = {}; saveState(); saveGrades(); refreshAll();
     }
   });
 
